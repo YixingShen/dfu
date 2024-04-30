@@ -641,9 +641,7 @@ def main() -> int:
         )
 
         dfu_release_interface(dev)
-
-        if error > 0:
-          return 1
+        return error
 
       if mode == MODE_DOWNLOAD:
         dfu_claim_interface(dev, interface, altsetting)
@@ -657,8 +655,7 @@ def main() -> int:
         )
 
         dfu_release_interface(dev)
-        if error > 0:
-          return 1
+        return error
 
       if mode == MODE_UPLOAD:
         dfu_claim_interface(dev, interface, altsetting)
@@ -672,9 +669,9 @@ def main() -> int:
         )
 
         dfu_release_interface(dev)
-        if error > 0:
-          return 1
+        return error
 
+    print("No command specified")
     return 0
   except (
     RuntimeError,

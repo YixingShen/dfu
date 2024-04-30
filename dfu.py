@@ -510,21 +510,18 @@ def detch(
     interface: int = 0,
 ) -> int:
     try:
-        global detach_delay
-        ret = dfu_detch(dev, interface)
+      global detach_delay
+      ret = dfu_detch(dev, interface)
 
-        if ret < 0:
-          print(f"can't send DFU_DETACH")
-          return 1
-        else :
-          print(f"send DFU_DETACH")
-          print(f"delay {detach_delay} sec")
-          sleep(detach_delay)
-
+      if ret < 0:
+        print(f"can't send DFU_DETACH")
+        return 1
+      else :
+        print(f"send DFU_DETACH")
+        print(f"delay {detach_delay} sec")
+        sleep(detach_delay)
     finally:
-        None
-
-    return 0
+      return 0
   
 def main() -> int:
   mode = MODE_NONE

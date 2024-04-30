@@ -1,21 +1,21 @@
 import argparse
 import logging
 import sys
-from time import sleep
-import dataclasses
 import os
+import colorama
+import dataclasses
+from time import sleep
+from typing import Any, List, Optional
 import usb.core
 import usb.util
 from usb.backend import libusb1
-import colorama
-from typing import Any, List, Optional
 
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
 # Default USB request timeout
 _TIMEOUT_MS = 5000
-detach_delay = 5
+_DETACH_DELAY_S = 5
 
 # DFU states
 _DFU_STATE_APP_IDLE = 0x00
@@ -63,16 +63,21 @@ _DFU_DESC_FUNCTIONAL = 0x21
 
 # mode
 MODE_NONE = 0
-MODE_VERSION = 1
-MODE_LIST = 2
-MODE_DETACH = 3
-MODE_UPLOAD = 4
-MODE_DOWNLOAD = 5
+MODE_LIST = 1
+MODE_DETACH = 2
+MODE_UPLOAD = 3
+MODE_DOWNLOAD = 4
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
 _DFU_PROTOCOL_RT  = 0x01
 _DFU_PROTOCOL_DFU = 0x02
+
+# DFU bmAttributes
+_DFU_CAN_DOWNLOAD	= (1 << 0)
+_DFU_CAN_UPLOAD	  = (1 << 1)
+_DFU_MANIFEST_TOL	= (1 << 2)
+_DFU_WILL_DETACH	= (1 << 3)
 
 @dataclasses.dataclass
 class dfu_status:
@@ -247,9 +252,9 @@ def dfu_download(
 
       if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
         break
-      elif (status.bState == _DFU_STATE_DFU_ERROR):
+      elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
         dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
-        raise RuntimeError(f"state is not OK: {status.bState} {status.bStatus}")
+        raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
       else :
         sleep(status.bwPollTimeout/1000)
 
@@ -280,9 +285,9 @@ def dfu_upload(
 
       if (status.bState == _DFU_STATE_DFU_UPLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
         break
-      elif (status.bState == _DFU_STATE_DFU_ERROR):
+      elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
         dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
-        raise RuntimeError(f"state is not OK: {status.bState} {status.bStatus}")
+        raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
       else :
         sleep(status.bwPollTimeout/1000)
 
@@ -309,27 +314,6 @@ def _get_dfu_devices(
                             if (
                                 intf.bInterfaceClass == 0xFE
                                 and intf.bInterfaceSubClass == 1
-                            ):
-                                return True
-            return False
-
-    back = libusb1.get_backend(find_library=lambda x: r"./libusb-1.0.dll")
-    return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
-
-def _get_dfu_mode_devices(
-    vid: Optional[int] = None, pid: Optional[int] = None
-) -> List[usb.core.Device]:
-    class FilterDFU:  # pylint: disable=too-few-public-methods
-        """Identify devices which are in DFU mode."""
-        def __call__(self, device: usb.core.Device) -> bool:
-            if vid is None or vid == device.idVendor:
-                if pid is None or pid == device.idProduct:
-                    for cfg in device:
-                        for intf in cfg:
-                            if (
-                                intf.bInterfaceClass == 0xFE
-                                and intf.bInterfaceSubClass == 1
-                                and intf.bInterfaceProtocol == _DFU_PROTOCOL_DFU
                             ):
                                 return True
             return False
@@ -510,7 +494,6 @@ def detch(
     interface: int = 0,
 ) -> int:
     try:
-      global detach_delay
       ret = dfu_detch(dev, interface)
 
       if ret < 0:
@@ -518,15 +501,64 @@ def detch(
         return 1
       else :
         print(f"send DFU_DETACH")
-        print(f"delay {detach_delay} sec")
-        sleep(detach_delay)
     finally:
       return 0
+
+def get_dfu_device(
+    vid: Optional[int] = None, pid: Optional[int] = None
+):
+  devices = _get_dfu_devices(vid=vid, pid=pid)
   
+  if not devices:
+      raise RuntimeError("No DFU devices found")
+  
+  if len(devices) > 1:
+      raise RuntimeError(
+          f"Too many DFU devices ({len(devices)}). List devices for "
+          "more info and specify vid:pid to filter."
+      )
+  
+  dev = devices[0]
+  
+  if (dev.get_active_configuration() == None):
+      try:
+          dev.set_configuration()
+      except usb.core.USBError as e:
+          raise ValueError("Could not set configuration: %s" % str(e))
+  
+  dfu_desc = get_dfu_descriptor(dev)
+  
+  if dfu_desc is None:
+    raise ValueError("No DFU descriptor, is this a valid DFU device?")
+  
+  if dfu_desc.bcdDFUVersion != 0x0101 :
+    raise ValueError("bcdDFUVersion != 0x0101")
+  
+  transfer_size = args.transfer_size
+  
+  if (transfer_size <= 0) :
+    transfer_size = dfu_desc.wTransferSize
+  
+  interface = 0
+  in_dfu_mode = False
+  
+  for cfg in dev:
+    for intf in cfg:
+      if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
+        interface = intf.bInterfaceNumber
+        if (intf.bInterfaceProtocol == _DFU_PROTOCOL_DFU):
+          in_dfu_mode = False
+  
+        break
+  
+  if (args.interface >= 0):
+    interface = args.interface
+  
+  altsetting = args.match_iface_alt_index
+  return dev, in_dfu_mode, interface, altsetting, transfer_size
+
 def main() -> int:
   mode = MODE_NONE
-  global dfu_mode_devices
-  dfu_mode_devices = None
 
   if args.device:
     vidpid = args.device.split(":")
@@ -551,125 +583,86 @@ def main() -> int:
       pid = None
   else:
     vid, pid = None, None
-  
-  # List DFU devices
+
   if args.list:
     mode = MODE_LIST
-    list_devices(vid=vid, pid=pid)
-    return 0
 
   if args.download_file:
-     mode = MODE_DOWNLOAD
+    mode = MODE_DOWNLOAD
 
   if args.upload_file:
-     mode = MODE_UPLOAD
+    mode = MODE_UPLOAD
 
   if args.detach:
-     mode = MODE_DETACH
+    mode = MODE_DETACH
 
-  try:
-    if mode == MODE_DETACH :
-      dfu_devices = _get_dfu_devices(vid=vid, pid=pid)
-      if not dfu_devices:
-          raise RuntimeError("No DFU devices found")
-  
-      if len(dfu_devices) > 1:
-          raise RuntimeError(
-              f"Too many devices ({len(dfu_devices)}). List devices for "
-              "more info and specify vid:pid to filter."
-          )
-  
-      dev = dfu_devices[0]
-
-    elif mode == MODE_DOWNLOAD or mode == MODE_UPLOAD:
-      dfu_mode_devices = _get_dfu_mode_devices(vid=vid, pid=pid)
-  
-      if not dfu_mode_devices:
-          raise RuntimeError("No devices found in DFU mode")
-  
-      if len(dfu_mode_devices) > 1:
-          raise RuntimeError(
-              f"Too many devices in DFU mode ({len(dfu_mode_devices)}). List devices for "
-              "more info and specify vid:pid to filter."
-          )
-
-      dev = dfu_mode_devices[0]
-
-    if mode == MODE_DETACH or mode == MODE_DOWNLOAD or mode == MODE_UPLOAD:
-      if (dev.get_active_configuration() == None):
-          try:
-              dev.set_configuration()
-          except usb.core.USBError as e:
-              raise ValueError("Could not set configuration: %s" % str(e))
-  
-      dfu_desc = get_dfu_descriptor(dev)
-  
-      if dfu_desc is None:
-        raise ValueError("No DFU descriptor, is this a valid DFU device?")
-  
-      if dfu_desc.bcdDFUVersion != 0x0101 :
-        raise ValueError("bcdDFUVersion != 0x0101")
-  
-      transfer_size = args.transfer_size
-
-      if (transfer_size <= 0) :
-        transfer_size = dfu_desc.wTransferSize
-
-      interface = 0
-
-      for cfg in dev:
-        for intf in cfg:
-          if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
-            interface = intf.bInterfaceNumber
-            break
-
-      if (args.interface >= 0):
-        interface = args.interface
-
-      altsetting = args.match_iface_alt_index
-
-      if mode == MODE_DETACH :
-        dfu_claim_interface(dev, interface, altsetting)
-        dev.set_interface_altsetting(interface, altsetting)
-
-        error = detch(
-          dev=dev,
-          interface=interface
-        )
-
-        dfu_release_interface(dev)
-        return error
-
-      if mode == MODE_DOWNLOAD:
-        dfu_claim_interface(dev, interface, altsetting)
-        dev.set_interface_altsetting(interface, altsetting)
-
-        error = download(
-          dev=dev,
-          filename=args.download_file,
-          interface=interface,
-          transferSize=transfer_size
-        )
-
-        dfu_release_interface(dev)
-        return error
-
-      if mode == MODE_UPLOAD:
-        dfu_claim_interface(dev, interface, altsetting)
-        dev.set_interface_altsetting(interface, altsetting)
-
-        error = upload(
-          dev=dev,
-          filename=args.upload_file,
-          interface=interface,
-          transferSize=transfer_size
-        )
-
-        dfu_release_interface(dev)
-        return error
-
+  if mode == MODE_NONE:
     print("No command specified")
     return 0
+
+  dev = None
+
+  try:
+    error = 0
+
+    if mode == MODE_LIST:
+      list_devices(vid=vid, pid=pid)
+      return error
+
+    dev, in_dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+    if mode == MODE_DETACH:
+      dfu_claim_interface(dev, interface, altsetting)
+      dev.set_interface_altsetting(interface, altsetting)
+      error = detch(dev=dev, interface=interface)
+      dfu_release_interface(dev)
+      return error
+
+    if in_dfu_mode == False:
+      dfu_claim_interface(dev, interface, altsetting)
+      dev.set_interface_altsetting(interface, altsetting)
+
+      status = dfu_get_state(dev, interface)
+      sleep(status.bwPollTimeout/1000)
+
+      if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
+          print("error clear status")
+          print(f"send DFU_CLRSTATUS")
+          if dfu_clear_status(dev, interface) < 0:
+            dfu_release_interface(dev)
+            return 1
+
+      if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
+        print(f"Device really in Run-Time Mode, send DFU detach request")
+        error = detch(dev=dev, interface=interface)
+        if error != 0:
+          return 1
+
+        dfu_release_interface(dev)
+        print(f"delay {args.detach_delay} sec")
+        sleep(args.detach_delay)
+        dev = None
+        dev, in_dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+
+    dfu_claim_interface(dev, interface, altsetting)
+    dev.set_interface_altsetting(interface, altsetting)
+    if mode == MODE_DOWNLOAD:
+      error = download(
+        dev=dev,
+        filename=args.download_file,
+        interface=interface,
+        transferSize=transfer_size
+      )
+
+    if mode == MODE_UPLOAD:
+      error = upload(
+        dev=dev,
+        filename=args.upload_file,
+        interface=interface,
+        transferSize=transfer_size
+      )
+
+    dfu_release_interface(dev)
+    return error
   except (
     RuntimeError,
     ValueError,
@@ -677,10 +670,16 @@ def main() -> int:
     IsADirectoryError,
     usb.core.USBError,
   ) as err:
+    if dev != None:
+      dfu_release_interface(dev)
     if mode == MODE_DOWNLOAD:
       logger.error("DFU download failed: %s", repr(err))
     elif mode == MODE_UPLOAD:
       logger.error("DFU upload failed: %s", repr(err))
+    elif mode == MODE_DETACH:
+      logger.error("DFU detach failed: %s", repr(err))
+    elif mode == MODE_LIST:
+      logger.error("DFU list failed: %s", repr(err))
     else :
       logger.error("failed: %s", repr(err))
 
@@ -751,6 +750,15 @@ if __name__ == '__main__':
     help="Detach currently attached DFU capable devices",
     action="store_true",
     default=False,
+  )
+  parser.add_argument(
+    "-E",
+    "--detach-delay",
+    dest="detach_delay",
+    help="seconds Time to wait before reopening a device after detach",
+    required=False,
+    type=lambda x: int(x,0),
+    default=_DETACH_DELAY_S,
   )
 
   args = parser.parse_args()

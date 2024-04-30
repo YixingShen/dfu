@@ -251,7 +251,7 @@ def dfu_download(
         dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
         raise RuntimeError(f"state is not OK: {status.bState} {status.bStatus}")
       else :
-        sleep(status.bwPollTimeout)
+        sleep(status.bwPollTimeout/1000)
 
 def dfu_upload(
     dev: usb.core.Device,
@@ -284,7 +284,7 @@ def dfu_upload(
         dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
         raise RuntimeError(f"state is not OK: {status.bState} {status.bStatus}")
       else :
-        sleep(status.bwPollTimeout)
+        sleep(status.bwPollTimeout/1000)
 
     return data
 

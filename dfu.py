@@ -507,47 +507,47 @@ def detch(
 def get_dfu_device(
     vid: Optional[int] = None, pid: Optional[int] = None
 ):
+  transfer_size = args.transfer_size
+  interface = 0
+  in_dfu_mode = False
+  altsetting = args.match_iface_alt_index
+  dev = None
   devices = _get_dfu_devices(vid=vid, pid=pid)
   
   if not devices:
-      raise RuntimeError("No DFU devices found")
-  
+    print("No DFU devices found")
+    return dev, in_dfu_mode, interface, altsetting, transfer_size
+
   if len(devices) > 1:
-      raise RuntimeError(
-          f"Too many DFU devices ({len(devices)}). List devices for "
-          "more info and specify vid:pid to filter."
-      )
-  
+    print(f"Too many DFU devices ({len(devices)}). List devices for "
+           "more info and specify vid:pid to filter.")
+    return dev, in_dfu_mode, interface, altsetting, transfer_size
+
   dev = devices[0]
-  
+
   if (dev.get_active_configuration() == None):
-      try:
-          dev.set_configuration()
-      except usb.core.USBError as e:
-          raise ValueError("Could not set configuration: %s" % str(e))
+    try:
+      dev.set_configuration()
+    except usb.core.USBError as e:
+      raise ValueError("Could not set configuration: %s" % str(e))
   
   dfu_desc = get_dfu_descriptor(dev)
-  
+
   if dfu_desc is None:
     raise ValueError("No DFU descriptor, is this a valid DFU device?")
-  
+
   if dfu_desc.bcdDFUVersion != 0x0101 :
     raise ValueError("bcdDFUVersion != 0x0101")
-  
-  transfer_size = args.transfer_size
-  
+
   if (transfer_size <= 0) :
     transfer_size = dfu_desc.wTransferSize
-  
-  interface = 0
-  in_dfu_mode = False
-  
+
   for cfg in dev:
     for intf in cfg:
       if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
         interface = intf.bInterfaceNumber
         if (intf.bInterfaceProtocol == _DFU_PROTOCOL_DFU):
-          in_dfu_mode = False
+          in_dfu_mode = True
   
         break
   
@@ -610,6 +610,10 @@ def main() -> int:
       return error
 
     dev, in_dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+
+    if dev == None:
+      return error
+
     if mode == MODE_DETACH:
       dfu_claim_interface(dev, interface, altsetting)
       dev.set_interface_altsetting(interface, altsetting)

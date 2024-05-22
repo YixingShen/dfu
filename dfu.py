@@ -9,9 +9,9 @@ from typing import Any, List, Optional
 import usb.core
 import usb.util
 from usb.backend import libusb1
+import _version
 
 logger = logging.getLogger()
-logging.basicConfig(level=logging.INFO)
 
 # Default USB request timeout
 _TIMEOUT_MS = 5000
@@ -63,10 +63,11 @@ _DFU_DESC_FUNCTIONAL = 0x21
 
 # mode
 MODE_NONE = 0
-MODE_LIST = 1
-MODE_DETACH = 2
-MODE_UPLOAD = 3
-MODE_DOWNLOAD = 4
+MODE_VERSION = 1
+MODE_LIST = 2
+MODE_DETACH = 3
+MODE_UPLOAD = 4
+MODE_DOWNLOAD = 5
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
@@ -93,240 +94,235 @@ class DfuDescriptor:
   bcdDFUVersion: int
 
 class ProgressBar:
-    bar_string_fmt = "\rProgress: [{}{}] {:.2%} {}/{}"
-    cnt = 0
+  bar_string_fmt = "\rProgress: [{}{}] {:.2%} {}/{}"
+  cnt = 0
+  
+  def __init__(self, total, bar_total=30):
+    self.total = total
+    self.bar_total = bar_total
+  
+  def update(self, step=1, value=None):
+    total = self.total
+    if (value is None):
+      self.cnt += step
+    else:
+      self.cnt = value
+    
+    bar_cnt = (int((self.cnt/total)*self.bar_total))
+    space_cnt = self.bar_total - bar_cnt
+    
+    progress = self.bar_string_fmt.format(
+      "█" * bar_cnt,
+      " " * space_cnt,
+      self.cnt/total,
+      self.cnt,
+      total
+    )
+  
+    print(colorama.Style.NORMAL + colorama.Fore.YELLOW + progress, end="    ")
+    percent = self.cnt/total
 
-    def __init__(self, total, bar_total=30):
-        self.total = total
-        self.bar_total = bar_total
-
-    def update(self, step=1, value=None):
-        total = self.total
-        if (value is None):
-            self.cnt += step
-        else:
-            self.cnt = value
-
-        bar_cnt = (int((self.cnt/total)*self.bar_total))
-        space_cnt = self.bar_total - bar_cnt
-
-        progress = self.bar_string_fmt.format(
-            "█" * bar_cnt,
-            " " * space_cnt,
-            self.cnt/total,
-            self.cnt,
-            total
-        )
-
-        print(colorama.Style.NORMAL + colorama.Fore.YELLOW + progress, end="")
-        percent = self.cnt/total
-
-        if percent >= 1:
-            print(colorama.Style.RESET_ALL + colorama.Fore.RESET + "\n")
+    if percent >= 1:
+      print(colorama.Style.RESET_ALL + colorama.Fore.RESET + "\n")
 
 def get_dfu_descriptor(dev: usb.core.Device) -> Optional[DfuDescriptor]:
-    for cfg in dev:
-        for intf in cfg:
-            # pyusb does not seem to automatically parse DFU descriptors
-            dfu_desc = intf.extra_descriptors
-            if (
-                len(dfu_desc) == _DFU_DESCRIPTOR_LEN
-                and dfu_desc[1] == _DFU_DESC_FUNCTIONAL
-            ):
-                desc = DfuDescriptor(
-                    bmAttributes=dfu_desc[2],
-                    wDetachTimeOut=dfu_desc[4] << 8 | dfu_desc[3],
-                    wTransferSize=dfu_desc[6] << 8 | dfu_desc[5],
-                    bcdDFUVersion=dfu_desc[8] << 8 | dfu_desc[7],
-                )
-                logger.debug("DFU descriptor: %s", desc)
-                return desc
-    return None
+  for cfg in dev:
+    for intf in cfg:
+      # pyusb does not seem to automatically parse DFU descriptors
+      dfu_desc = intf.extra_descriptors
+      if (len(dfu_desc) == _DFU_DESCRIPTOR_LEN and dfu_desc[1] == _DFU_DESC_FUNCTIONAL):
+          desc = DfuDescriptor(
+            bmAttributes=dfu_desc[2],
+            wDetachTimeOut=dfu_desc[4] << 8 | dfu_desc[3],
+            wTransferSize=dfu_desc[6] << 8 | dfu_desc[5],
+            bcdDFUVersion=dfu_desc[8] << 8 | dfu_desc[7],
+          )
+          logger.debug("DFU descriptor: %s", desc)
+          return desc
+  return None
 
 def dfu_get_state(
     dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
 ) -> dfu_status:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_IN,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    status = dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_GETSTATUS,
-        wValue=0,
-        wIndex=interface,
-        data_or_wLength=6,
-        timeout=timeout_ms,
-    )
-
-    status = dfu_status(
-        bStatus=status[0],
-        bwPollTimeout=((0xff & status[3]) << 16) |((0xff & status[2]) << 8)  | (0xff & status[1]),
-        bState=status[4]
-    )
-
-    return status
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_IN,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  status = dev.ctrl_transfer(
+    bmRequestType=bmRequestType,
+    bRequest=_DFU_CMD_GETSTATUS,
+    wValue=0,
+    wIndex=interface,
+    data_or_wLength=6,
+    timeout=timeout_ms,
+  )
+  
+  status = dfu_status(
+    bStatus=status[0],
+    bwPollTimeout=((0xff & status[3]) << 16) |((0xff & status[2]) << 8)  | (0xff & status[1]),
+    bState=status[4]
+  )
+  
+  return status
 
 def dfu_clear_status(
-    dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
+  dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
 ) -> Any:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_OUT,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    ret = dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_CLRSTATUS,
-        wValue=0,
-        wIndex=interface,
-        data_or_wLength=None,
-        timeout=timeout_ms,
-    )
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_OUT,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  ret = dev.ctrl_transfer(
+      bmRequestType=bmRequestType,
+      bRequest=_DFU_CMD_CLRSTATUS,
+      wValue=0,
+      wIndex=interface,
+      data_or_wLength=None,
+      timeout=timeout_ms,
+  )
 
-    return ret
+  return ret
 
 def dfu_abort_status(
-    dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
+  dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
 ) -> Any:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_OUT,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    ret = dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_ABORT,
-        wValue=0,
-        wIndex=interface,
-        data_or_wLength=None,
-        timeout=timeout_ms,
-    )
-
-    return ret
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_OUT,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  ret = dev.ctrl_transfer(
+      bmRequestType=bmRequestType,
+      bRequest=_DFU_CMD_ABORT,
+      wValue=0,
+      wIndex=interface,
+      data_or_wLength=None,
+      timeout=timeout_ms,
+  )
+  
+  return ret
 
 def dfu_detch(
-    dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
+  dev: usb.core.Device, interface: int, timeout_ms: int = _TIMEOUT_MS
 ) -> Any:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_OUT,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    ret = dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_DETACH,
-        wValue=0,
-        wIndex=interface,
-        data_or_wLength=None,
-        timeout=timeout_ms,
-    )
-
-    return ret
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_OUT,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  ret = dev.ctrl_transfer(
+      bmRequestType=bmRequestType,
+      bRequest=_DFU_CMD_DETACH,
+      wValue=0,
+      wIndex=interface,
+      data_or_wLength=None,
+      timeout=timeout_ms,
+  )
+  
+  return ret
 
 def dfu_download(
-    dev: usb.core.Device,
-    interface: int,
-    transaction: int,
-    data: Optional[bytes],
-    timeout_ms: int = _TIMEOUT_MS,
+  dev: usb.core.Device,
+  interface: int,
+  transaction: int,
+  data: Optional[bytes],
+  timeout_ms: int = _TIMEOUT_MS,
 ) -> None:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_OUT,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_DOWNLOAD,
-        wValue=transaction,
-        wIndex=interface,
-        data_or_wLength=data,
-        timeout=timeout_ms,
-    )
-
-    while (True):
-      status = dfu_get_state(dev, interface, timeout_ms=timeout_ms)
-      #print(status.bState)
-
-      if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
-        break
-      elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
-        dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
-        raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
-      else :
-        sleep(status.bwPollTimeout/1000)
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_OUT,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  dev.ctrl_transfer(
+      bmRequestType=bmRequestType,
+      bRequest=_DFU_CMD_DOWNLOAD,
+      wValue=transaction,
+      wIndex=interface,
+      data_or_wLength=data,
+      timeout=timeout_ms,
+  )
+  
+  while (True):
+    status = dfu_get_state(dev, interface, timeout_ms=timeout_ms)
+    #print(status.bState)
+  
+    if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
+      break
+    elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
+      dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
+      raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
+    else :
+      sleep(status.bwPollTimeout/1000)
 
 def dfu_upload(
-    dev: usb.core.Device,
-    interface: int,
-    transaction: int,
-    xfersize: int,
-    timeout_ms: int = _TIMEOUT_MS,
+  dev: usb.core.Device,
+  interface: int,
+  transaction: int,
+  xfersize: int,
+  timeout_ms: int = _TIMEOUT_MS,
 ) -> bytes:
-    bmRequestType = usb.util.build_request_type(
-                        usb.util.CTRL_IN,
-                        usb.util.CTRL_TYPE_CLASS,
-                        usb.util.CTRL_RECIPIENT_INTERFACE
-                    )
-    data = dev.ctrl_transfer(
-        bmRequestType=bmRequestType,
-        bRequest=_DFU_CMD_UPLOAD,
-        wValue=transaction,
-        wIndex=interface,
-        data_or_wLength=xfersize,
-        timeout=timeout_ms,
-    )
+  bmRequestType = usb.util.build_request_type(
+                  usb.util.CTRL_IN,
+                  usb.util.CTRL_TYPE_CLASS,
+                  usb.util.CTRL_RECIPIENT_INTERFACE
+  )
+  data = dev.ctrl_transfer(
+      bmRequestType=bmRequestType,
+      bRequest=_DFU_CMD_UPLOAD,
+      wValue=transaction,
+      wIndex=interface,
+      data_or_wLength=xfersize,
+      timeout=timeout_ms,
+  )
 
-    while (True):
-      status = dfu_get_state(dev, interface, timeout_ms=timeout_ms)
-      #print(status.bState)
+  while (True):
+    status = dfu_get_state(dev, interface, timeout_ms=timeout_ms)
+    #print(status.bState)
+  
+    if (status.bState == _DFU_STATE_DFU_UPLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
+      break
+    elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
+      dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
+      raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
+    else :
+      sleep(status.bwPollTimeout/1000)
 
-      if (status.bState == _DFU_STATE_DFU_UPLOAD_IDLE or status.bState == _DFU_STATE_DFU_IDLE):
-        break
-      elif (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
-        dfu_clear_status(dev, interface, timeout_ms=timeout_ms)
-        raise RuntimeError(f"status is not OK: {status.bState} {status.bStatus}")
-      else :
-        sleep(status.bwPollTimeout/1000)
-
-    return data
+  return data
 
 def dfu_claim_interface(dev: usb.core.Device, interface: int, alt: int) -> None:
-    logger.info("Claiming USB DFU interface %d", interface)
-    usb.util.claim_interface(dev, interface)
+  logger.info("Claiming USB DFU interface %d", interface)
+  usb.util.claim_interface(dev, interface)
 
 def dfu_release_interface(dev: usb.core.Device) -> None:
-    logger.info("Releasing USB DFU interface")
-    usb.util.dispose_resources(dev)
+  logger.info("Releasing USB DFU interface")
+  usb.util.dispose_resources(dev)
 
 def _get_dfu_devices(
-    vid: Optional[int] = None, pid: Optional[int] = None
+  vid: Optional[int] = None, pid: Optional[int] = None
 ) -> List[usb.core.Device]:
-    class FilterDFU:  # pylint: disable=too-few-public-methods
-        """Identify DFU devices"""
-        def __call__(self, device: usb.core.Device) -> bool:
-            if vid is None or vid == device.idVendor:
-                if pid is None or pid == device.idProduct:
-                    for cfg in device:
-                        for intf in cfg:
-                            if (
-                                intf.bInterfaceClass == 0xFE
-                                and intf.bInterfaceSubClass == 1
-                            ):
-                                return True
-            return False
-
-    back = libusb1.get_backend(find_library=lambda x: r"./libusb-1.0.dll")
-    return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
+  class FilterDFU:  # pylint: disable=too-few-public-methods
+    """Identify DFU devices"""
+    def __call__(self, device: usb.core.Device) -> bool:
+      if vid is None or vid == device.idVendor:
+        if pid is None or pid == device.idProduct:
+          for cfg in device:
+            for intf in cfg:
+              if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
+                return True
+      return False
+    
+  back = libusb1.get_backend(find_library=lambda x: r"./libusb-1.0.dll")
+  return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
 
 def _dfu_download(
-    dev: usb.core.Device, interface: int, data: bytes, xfersize: int
+  dev: usb.core.Device, interface: int, data: bytes, xfersize: int
 ) -> None:
   transaction = 0
   bytes_downloaded = 0
-  progressbar = ProgressBar(len(data))
+  _totol = len(data)+1
+  progressbar = ProgressBar(total=_totol, bar_total=int(_totol/10))
 
   try:
     while bytes_downloaded < len(data):
@@ -340,172 +336,179 @@ def _dfu_download(
         )
   
         dfu_download(dev, interface, transaction, chunk)
-  
+        progressbar.update(value=bytes_downloaded)
         transaction += 1
         bytes_downloaded += chunk_size
-        progressbar.update(value=bytes_downloaded)
 
     # send one zero sized download request to signalize end
     dfu_download(dev, interface, transaction, None)
-    #progressbar.update(value=progressbar.total)
+    progressbar.update(value=progressbar.total)
   except usb.core.USBError as err:
     logger.warning("Ignoring USB error when exiting DFU: %s", err)
 
 def _dfu_upload(
-    dev: usb.core.Device, interface: int, transferSize: int
+  dev: usb.core.Device, interface: int, transferSize: int
 ) -> bytes:
-    transaction = 0
-    data = bytes()
-    progressbar = ProgressBar(100)
+  transaction = 0
+  bytes_uploaded = 0
+  _totol = int(args.upload_size+1)
+  progressbar = ProgressBar(total=_totol, bar_total=int(_totol/10))
+  data = bytes()
 
+  try:
     while True:
-      try:
-        rdata = dfu_upload(dev, interface, transaction, transferSize)
-        data += rdata
-
-        if len(rdata) < transferSize :
-          break
-
-        transaction += 1
-        progressbar.update(value=(transaction%100))
-      except usb.core.USBError as err:
-        logger.warning("Ignoring USB error when exiting DFU: %s", err)
-
-    progressbar.update(value=progressbar.total)
-    return data
+      rdata = dfu_upload(dev, interface, transaction, transferSize)
+      if bytes_uploaded < progressbar.total:
+        progressbar.update(value=bytes_uploaded)
+      else :
+        progressbar.update(value=progressbar.total-1)
+  
+      data += rdata
+      bytes_uploaded += len(rdata)
+      transaction += 1
+  
+      if len(rdata) < transferSize :
+        break
+  
+    progressbar = ProgressBar(total=bytes_uploaded)
+    progressbar.update(value=bytes_uploaded)
+  except usb.core.USBError as err:
+    logger.warning("Ignoring USB error when exiting DFU: %s", err)
+  
+  return data
 
 def list_devices(vid: Optional[int] = None, pid: Optional[int] = None) -> None:
-    devicelist = _get_dfu_devices(vid=vid, pid=pid)
-
-    if not devicelist:
-      print("No DFU devices found")
-    else :
-      for device in devicelist:
-          print("DFU devices: Bus {} Device {:03d}: ID {:04x}:{:04x}".format(device.bus, device.address, device.idVendor, device.idProduct))
+  devicelist = _get_dfu_devices(vid=vid, pid=pid)
+  
+  if not devicelist:
+    print("No DFU devices found")
+  else :
+    for device in devicelist:
+        print("DFU devices: Bus {} Device {:03d}: ID {:04x}:{:04x}".format(device.bus, device.address, device.idVendor, device.idProduct))
 
 def download(
-    dev: usb.core.Device,
-    filename: str,
-    interface: int = 0,
-    transferSize: int = 0,
+  dev: usb.core.Device,
+  filename: str,
+  interface: int = 0,
+  transferSize: int = 0,
 ) -> int:
-    logger.info("Downloading binary file: %s", filename)
-
-    if not os.path.exists(filename) :
-      print(f"not exists: {filename}")
+  logger.info("Downloading binary file: %s", filename)
+  
+  if not os.path.exists(filename) :
+    print(f"not exists: {filename}")
+    return 1
+  
+  if not os.access(filename, os.R_OK) :
+    print(f"not readable: {filename}")
+    return 1
+  
+  fin = open(filename, "rb")
+  
+  try:
+    status = dfu_get_state(dev, interface)
+    if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
+      print(f"Device still run in Run-Time Mode, status.bState = {status.bState}")
       return 1
-
-    if not os.access(filename, os.R_OK) :
-      print(f"not readable: {filename}")
-      return 1
-
-    fin = open(filename, "rb")
-
-    try:
-        status = dfu_get_state(dev, interface)
-        if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
-          print(f"Device still run in Run-Time Mode, status.bState = {status.bState}")
-          return 1
-          
-        status = dfu_get_state(dev, interface)
-        if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
-          print("error clear status")
-          print(f"send DFU_CLRSTATUS")
-          ret = dfu_clear_status(dev, interface)
-          if ret < 0:
-            return 1
-
-        status = dfu_get_state(dev, interface)
-        if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
-          print("aborting previous incomplete transfer")
-          print(f"send DFU_ABORT")
-          ret = dfu_abort_status(dev, interface)
-          if ret < 0:
-            print(f"can't send DFU_ABORT")
-            return 1
-
-          status = dfu_get_state(dev, interface)
-          if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
-            print(f"abort is not OK")
-            return 1
-          else :
-            print(f"abort is OK")
-
-        data = fin.read()
-        _dfu_download(dev, interface, data, transferSize)
-    finally:
-        fin.close()
-
-    return 0
-
-def upload(
-    dev: usb.core.Device,
-    filename: str,
-    interface: int = 0,
-    transferSize: int = 0,
-) -> int:
-    logger.info("Uploading binary file: %s", filename)
-    fout = open(filename, "wb")
-
-    if not os.access(filename, os.W_OK) :
-       print(f"not writable: {filename}")
-       return 1
-
-    try:
-        status = dfu_get_state(dev, interface)
-        if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
-          print(f"Device still run in Run-Time Mode, status.bState = {status.bState}")
-          return 1
-
-        status = dfu_get_state(dev, interface)
-        if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
-          print("error clear status")
-          print(f"send DFU_CLRSTATUS")
-          ret = dfu_clear_status(dev, interface)
-          if ret < 0:
-            return 1
-
-        status = dfu_get_state(dev, interface)
-        if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
-          print("aborting previous incomplete transfer")
-          print(f"send DFU_ABORT")
-          ret = dfu_abort_status(dev, interface)
-          if ret < 0:
-            print(f"can't send DFU_ABORT")
-            return 1
-
-          status = dfu_get_state(dev, interface)
-          if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
-            print(f"abort is not OK")
-            return 1
-          else :
-            print(f"abort is OK")
-
-        data = _dfu_upload(dev, interface, transferSize)
-        if len(data) > 0:
-          fout.write(data)
-    finally:
-        fout.close()
-
-    return 0
-
-def detch(
-    dev: usb.core.Device,
-    interface: int = 0,
-) -> int:
-    try:
-      ret = dfu_detch(dev, interface)
-
+      
+    status = dfu_get_state(dev, interface)
+    if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
+      print("error clear status")
+      print(f"send DFU_CLRSTATUS")
+      ret = dfu_clear_status(dev, interface)
       if ret < 0:
-        print(f"can't send DFU_DETACH")
+        return 1
+    
+    status = dfu_get_state(dev, interface)
+    if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
+      print("aborting previous incomplete transfer")
+      print(f"send DFU_ABORT")
+      ret = dfu_abort_status(dev, interface)
+      if ret < 0:
+        print(f"can't send DFU_ABORT")
+        return 1
+    
+      status = dfu_get_state(dev, interface)
+      if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
+        print(f"abort is not OK")
         return 1
       else :
-        print(f"send DFU_DETACH")
-    finally:
-      return 0
+        print(f"abort is OK")
+    
+    data = fin.read()
+    _dfu_download(dev, interface, data, transferSize)
+  finally:
+    fin.close()
+  
+  return 0
+
+def upload(
+  dev: usb.core.Device,
+  filename: str,
+  interface: int = 0,
+  transferSize: int = 0,
+) -> int:
+  logger.info("Uploading binary file: %s", filename)
+  fout = open(filename, "wb")
+  
+  if not os.access(filename, os.W_OK) :
+     print(f"not writable: {filename}")
+     return 1
+  
+  try:
+    status = dfu_get_state(dev, interface)
+    if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
+      print(f"Device still run in Run-Time Mode, status.bState = {status.bState}")
+      return 1
+
+    status = dfu_get_state(dev, interface)
+    if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
+      print("error clear status")
+      print(f"send DFU_CLRSTATUS")
+      ret = dfu_clear_status(dev, interface)
+      if ret < 0:
+        return 1
+
+    status = dfu_get_state(dev, interface)
+    if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
+      print("aborting previous incomplete transfer")
+      print(f"send DFU_ABORT")
+      ret = dfu_abort_status(dev, interface)
+      if ret < 0:
+        print(f"can't send DFU_ABORT")
+        return 1
+    
+      status = dfu_get_state(dev, interface)
+      if (status.bState == _DFU_STATE_DFU_DOWNLOAD_IDLE or status.bState == _DFU_STATE_DFU_UPLOAD_IDLE):
+        print(f"abort is not OK")
+        return 1
+      else :
+        print(f"abort is OK")
+    
+    data = _dfu_upload(dev, interface, transferSize)
+    if len(data) > 0:
+      fout.write(data)
+  finally:
+    fout.close()
+  
+  return 0
+
+def detch(
+  dev: usb.core.Device,
+  interface: int = 0,
+) -> int:
+  try:
+    ret = dfu_detch(dev, interface)
+  
+    if ret < 0:
+      print(f"can't send DFU_DETACH")
+      return 1
+    else :
+      print(f"send DFU_DETACH")
+  finally:
+    return 0
 
 def get_dfu_device(
-    vid: Optional[int] = None, pid: Optional[int] = None
+  vid: Optional[int] = None, pid: Optional[int] = None
 ):
   transfer_size = args.transfer_size
   interface = 0
@@ -596,6 +599,14 @@ def main() -> int:
   if args.detach:
     mode = MODE_DETACH
 
+  if args.version:
+    mode = MODE_VERSION
+
+  print(f"dfu.py version {_version.__version__}")
+
+  if mode == MODE_VERSION:
+    return 0
+
   if mode == MODE_NONE:
     print("No command specified")
     return 0
@@ -630,13 +641,13 @@ def main() -> int:
 
       if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
           print("error clear status")
-          print(f"send DFU_CLRSTATUS")
+          print("send DFU_CLRSTATUS")
           if dfu_clear_status(dev, interface) < 0:
             dfu_release_interface(dev)
             return 1
 
       if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
-        print(f"Device really in Run-Time Mode, send DFU detach request")
+        print("Device really in Run-Time Mode, send DFU detach request")
         error = detch(dev=dev, interface=interface)
         if error != 0:
           return 1
@@ -665,6 +676,15 @@ def main() -> int:
         transferSize=transfer_size
       )
 
+    if args.final_reset and error == 0:
+      print(f"delay {args.detach_delay} sec")
+      detch(dev=dev, interface=interface)
+      dfu_release_interface(dev)
+      print(f"delay {args.detach_delay} sec")
+      sleep(args.detach_delay)
+      print("issue usb reset")
+      dev.reset()
+
     dfu_release_interface(dev)
     return error
   except (
@@ -690,7 +710,15 @@ def main() -> int:
     return 1
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description="DFU 1.1 utility")
+  parser = argparse.ArgumentParser(description="Device firmware update (DFU) USB programmer")
+  parser.add_argument(
+    "-V",
+    "--version",
+    dest="version",
+    help="Print the version number",
+    action="store_true",
+    default=False,
+  )
   parser.add_argument(
     "-l",
     "--list",
@@ -710,24 +738,33 @@ if __name__ == '__main__':
     "-U",
     "--upload",
     dest="upload_file",
-    help="Read firmware from device into <file",
+    help="Read firmware from device into <file>",
     required=False,
   )
   parser.add_argument(
     "-d",
     "--device",
     dest="device",
-    help="Specify DFU device in hex as <vid>:<pid>",
+    help="Specify DFU device in hex as <vid> or <vid>:<pid>",
     required=False,
   )
   parser.add_argument(
     "-i",
     "--intf",
     dest="interface",
-    help="Specify the DFU Interface number",
+    help="Specify the DFU Interface number. default is -1 \"auto detect DFU interface from USB descriptor\"",
     required=False,
     type=lambda x: int(x,0),
     default=-1,
+  )
+  parser.add_argument(
+    "-a",
+    "--alt",
+    dest="match_iface_alt_index",
+    help="Specify the Altsetting of the DFU Interface by number. default is 0",
+    required=False,
+    type=lambda x: int(x,0),
+    default=0,
   )
   parser.add_argument(
     "-t",
@@ -739,13 +776,13 @@ if __name__ == '__main__':
     default=0,
   )
   parser.add_argument(
-    "-a",
-    "--alt",
-    dest="match_iface_alt_index",
-    help="Specify the Altsetting of the DFU Interface by number",
+    "-Z",
+    "--upload-size",
+    dest="upload_size",
+    help="Specify the expected upload size, in bytes",
     required=False,
     type=lambda x: int(x,0),
-    default=0,
+    default=1024*1024*32, #32M Bytes
   )
   parser.add_argument(
     "-e",
@@ -764,6 +801,43 @@ if __name__ == '__main__':
     type=lambda x: int(x,0),
     default=_DETACH_DELAY_S,
   )
+  parser.add_argument(
+    "-R",
+    "--reset",
+    dest="final_reset",
+    help="detach and issue USB Reset signalling once we're finished",
+    action="store_true",
+    default=False,
+  )
+  parser.add_argument(
+    "-v",
+    "--verbose",
+    dest="verbose",
+    help="Print verbose debug statements",
+    action="store_true",
+    default=False,
+  )
 
   args = parser.parse_args()
+
+  if args.verbose:
+    logging.basicConfig(level=logging.DEBUG)
+  else :
+    logging.basicConfig(level=logging.INFO)
+
+  if args.verbose:
+    print(f'version = {args.version}')
+    print(f'verbose = {args.verbose}')
+    print(f'list = {args.list}')
+    print(f'download_file = {args.download_file}')
+    print(f'upload_file = {args.upload_file}')
+    print(f'device = {args.device}')
+    print(f'interface = {args.interface}')
+    print(f'match_iface_alt_index = {args.match_iface_alt_index}')
+    print(f'transfer_size = {args.transfer_size}')
+    print(f'upload_size = {args.upload_size}')
+    print(f'detach = {args.detach}')
+    print(f'detach_delay = {args.detach_delay}')
+    print(f'final_reset = {args.final_reset}')
+
   sys.exit(main())

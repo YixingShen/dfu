@@ -292,7 +292,7 @@ def dfu_upload(
   return data
 
 def dfu_claim_interface(dev: usb.core.Device, interface: int, alt: int) -> None:
-  print(f"Uploading binary file: {interface}")
+  print(f"Claiming USB DFU interface: {interface}")
   usb.util.claim_interface(dev, interface)
 
 def dfu_release_interface(dev: usb.core.Device) -> None:
@@ -630,7 +630,7 @@ def main() -> int:
   if args.verbose:
     print(f"command = {command}")
 
-  dev = None
+  dfu_device = None
 
   try:
     error = 0
@@ -639,55 +639,73 @@ def main() -> int:
       list_devices(vid=vid, pid=pid)
       return error
 
-    dev, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+    dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
-    if dev == None:
-      return error
+    if dfu_device == None:
+      return 1
 
     if args.verbose:
-      print(f"dfu vid:pid = {dev.idVendor:04x}:{dev.idProduct:04x}")
-      print(f"selected interface = {interface}")
-      print(f"selected altsetting = {altsetting}")
-      print(f"selected transfer size = {transfer_size}")
+      print(f"get_dfu_device:")
+      print(f" vid:pid = {dfu_device.idVendor:04x}:{dfu_device.idProduct:04x}")
+      print(f" dfu_mode = {dfu_mode}")
+      print(f" selected interface = {interface}")
+      print(f" selected altsetting = {altsetting}")
+      print(f" selected transfer size = {transfer_size}")
 
     if command == CMD_DETACH:
-      dfu_claim_interface(dev, interface, altsetting)
-      dev.set_interface_altsetting(interface, altsetting)
-      error = detch(dev=dev, interface=interface)
-      dfu_release_interface(dev)
+      dfu_claim_interface(dfu_device, interface, altsetting)
+      dfu_device.set_interface_altsetting(interface, altsetting)
+      error = detch(dfu_device, interface)
+      dfu_release_interface(dfu_device)
       return error
 
     if dfu_mode != _DFU_PROTOCOL_DFU:
-      dfu_claim_interface(dev, interface, altsetting)
-      dev.set_interface_altsetting(interface, altsetting)
+      print(f"Device is running in run-time mode")
+      dfu_claim_interface(dfu_device, interface, altsetting)
+      dfu_device.set_interface_altsetting(interface, altsetting)
 
-      status = dfu_get_state(dev, interface)
+      status = dfu_get_state(dfu_device, interface)
       sleep(status.bwPollTimeout/1000)
 
       if (status.bStatus != _DFU_STATUS_OK or status.bState == _DFU_STATE_DFU_ERROR):
-          print("error clear status")
           print("send DFU_CLRSTATUS")
-          if dfu_clear_status(dev, interface) < 0:
-            dfu_release_interface(dev)
+          if dfu_clear_status(dfu_device, interface) < 0:
+            dfu_release_interface(dfu_device)
             return 1
 
       if (status.bState == _DFU_STATE_APP_IDLE or status.bState == _DFU_STATE_APP_DETACH):
-        print("Device really in Run-Time Mode, send DFU detach request")
-        error = detch(dev=dev, interface=interface)
+        print("Device is really in run-time mode, send DFU detach request")
+        error = detch(dfu_device, interface)
         if error != 0:
           return 1
 
-        dfu_release_interface(dev)
+        dfu_release_interface(dfu_device)
         print(f"delay {args.detach_delay} sec")
         sleep(args.detach_delay)
-        dev = None
-        dev, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+        dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
-    dfu_claim_interface(dev, interface, altsetting)
-    dev.set_interface_altsetting(interface, altsetting)
+        if dfu_device == None:
+          return 1
+
+        if dfu_mode != _DFU_PROTOCOL_DFU:
+          print(f"Failed! device is still in run-time mode")
+          return 1
+
+        if args.verbose:
+          print(f"get_dfu_device:")
+          print(f" vid:pid = {dfu_device.idVendor:04x}:{dfu_device.idProduct:04x}")
+          print(f" dfu_mode = {dfu_mode}")
+          print(f" selected interface = {interface}")
+          print(f" selected altsetting = {altsetting}")
+          print(f" selected transfer size = {transfer_size}")
+
+    print(f"Device is really in dfu mode")
+    dfu_claim_interface(dfu_device, interface, altsetting)
+    dfu_device.set_interface_altsetting(interface, altsetting)
+
     if command == CMD_DOWNLOAD:
       error = download(
-        dev=dev,
+        dev=dfu_device,
         filename=args.download_file,
         interface=interface,
         transferSize=transfer_size
@@ -695,20 +713,20 @@ def main() -> int:
 
     if command == CMD_UPLOAD:
       error = upload(
-        dev=dev,
+        dev=dfu_device,
         filename=args.upload_file,
         interface=interface,
         transferSize=transfer_size
       )
 
     if args.final_reset and error == 0:
-      detch(dev=dev, interface=interface)
+      detch(dfu_device, interface)
       print(f"delay {args.detach_delay} sec")
       sleep(args.detach_delay)
       print("issue usb reset")
-      dev.reset()
+      dfu_device.reset()
 
-    dfu_release_interface(dev)
+    dfu_release_interface(dfu_device)
     return error
   except (
     RuntimeError,
@@ -717,8 +735,8 @@ def main() -> int:
     IsADirectoryError,
     usb.core.USBError,
   ) as err:
-    if dev != None:
-      dfu_release_interface(dev)
+    if dfu_device != None:
+      dfu_release_interface(dfu_device)
     if command == CMD_DOWNLOAD:
       logger.error("DFU download failed: %s", repr(err))
     elif command == CMD_UPLOAD:

@@ -504,6 +504,8 @@ def detch(
       return 1
     else :
       print(f"send DFU_DETACH")
+      print(f"delay {args.detach_delay} sec")
+      sleep(args.detach_delay)
   finally:
     return 0
 
@@ -680,8 +682,6 @@ def main() -> int:
           return 1
 
         dfu_release_interface(dfu_device)
-        print(f"delay {args.detach_delay} sec")
-        sleep(args.detach_delay)
         dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
         if dfu_device == None:

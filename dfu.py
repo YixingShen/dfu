@@ -322,7 +322,7 @@ def _dfu_download(
   transaction = 0
   bytes_downloaded = 0
   _totol = len(data)+1
-  progressbar = ProgressBar(total=_totol, bar_total=int(_totol/10))
+  progressbar = ProgressBar(total=_totol, bar_total=30)
 
   try:
     while bytes_downloaded < len(data):
@@ -352,7 +352,7 @@ def _dfu_upload(
   transaction = 0
   bytes_uploaded = 0
   _totol = int(args.upload_size+1)
-  progressbar = ProgressBar(total=_totol, bar_total=int(_totol/10))
+  progressbar = ProgressBar(total=_totol, bar_total=30)
   data = bytes()
 
   try:
@@ -512,19 +512,19 @@ def get_dfu_device(
 ):
   transfer_size = args.transfer_size
   interface = 0
-  in_dfu_mode = False
+  dfu_mode = 0
   altsetting = args.match_iface_alt_index
   dev = None
   devices = _get_dfu_devices(vid=vid, pid=pid)
   
   if not devices:
     print("No DFU devices found")
-    return dev, in_dfu_mode, interface, altsetting, transfer_size
+    return dev, dfu_mode, interface, altsetting, transfer_size
 
   if len(devices) > 1:
     print(f"Too many DFU devices ({len(devices)}). List devices for "
            "more info and specify vid:pid to filter.")
-    return dev, in_dfu_mode, interface, altsetting, transfer_size
+    return dev, dfu_mode, interface, altsetting, transfer_size
 
   dev = devices[0]
 
@@ -537,10 +537,26 @@ def get_dfu_device(
   dfu_desc = get_dfu_descriptor(dev)
 
   if dfu_desc is None:
-    raise ValueError("No DFU descriptor, is this a valid DFU device?")
+    raise ValueError("No DFU Functional descriptor, is this a valid DFU device?")
 
-  if dfu_desc.bcdDFUVersion != 0x0101 :
-    raise ValueError("bcdDFUVersion != 0x0101")
+  if args.verbose:
+    print(f"DFU Functional descriptor:")
+    print(f" bcdDFUVersion = 0x{dfu_desc.bcdDFUVersion:04X}")
+    print(f" wDetachTimeOut = 0x{dfu_desc.wDetachTimeOut}")
+    print(f" wTransferSize = 0x{dfu_desc.wTransferSize}")
+    print(f" bmAttributes = 0x{dfu_desc.bmAttributes}")
+  
+    if (dfu_desc.bmAttributes & _DFU_CAN_DOWNLOAD):
+      print(f"  bitCanDnload = {dfu_desc.bmAttributes}")
+    if (dfu_desc.bmAttributes & _DFU_CAN_UPLOAD):
+      print(f"  bitCanUpload = {dfu_desc.bmAttributes}")
+    if (dfu_desc.bmAttributes & _DFU_MANIFEST_TOL):
+      print(f"  bitManifestationTolerant = {dfu_desc.bmAttributes}")
+    if (dfu_desc.bmAttributes & _DFU_WILL_DETACH):
+      print(f"  bitWillDetach = {dfu_desc.bmAttributes}")
+
+  #if dfu_desc.bcdDFUVersion != 0x0101 :
+  #  raise ValueError("bcdDFUVersion != 0x0101")
 
   if (transfer_size <= 0) :
     transfer_size = dfu_desc.wTransferSize
@@ -550,15 +566,15 @@ def get_dfu_device(
       if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
         interface = intf.bInterfaceNumber
         if (intf.bInterfaceProtocol == _DFU_PROTOCOL_DFU):
-          in_dfu_mode = True
+          dfu_mode = _DFU_PROTOCOL_DFU
   
         break
-  
+
   if (args.interface >= 0):
     interface = args.interface
   
   altsetting = args.match_iface_alt_index
-  return dev, in_dfu_mode, interface, altsetting, transfer_size
+  return dev, dfu_mode, interface, altsetting, transfer_size
 
 def main() -> int:
   mode = MODE_NONE
@@ -620,10 +636,16 @@ def main() -> int:
       list_devices(vid=vid, pid=pid)
       return error
 
-    dev, in_dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+    dev, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
     if dev == None:
       return error
+
+    if args.verbose:
+      print(f"dfu vid:pid = {dev.idVendor:04x}:{dev.idProduct:04x}")
+      print(f"selected interface = {interface}")
+      print(f"selected altsetting = {altsetting}")
+      print(f"selected transfer size = {transfer_size}")
 
     if mode == MODE_DETACH:
       dfu_claim_interface(dev, interface, altsetting)
@@ -632,7 +654,7 @@ def main() -> int:
       dfu_release_interface(dev)
       return error
 
-    if in_dfu_mode == False:
+    if dfu_mode != _DFU_PROTOCOL_DFU:
       dfu_claim_interface(dev, interface, altsetting)
       dev.set_interface_altsetting(interface, altsetting)
 
@@ -656,7 +678,7 @@ def main() -> int:
         print(f"delay {args.detach_delay} sec")
         sleep(args.detach_delay)
         dev = None
-        dev, in_dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+        dev, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
     dfu_claim_interface(dev, interface, altsetting)
     dev.set_interface_altsetting(interface, altsetting)
@@ -677,9 +699,7 @@ def main() -> int:
       )
 
     if args.final_reset and error == 0:
-      print(f"delay {args.detach_delay} sec")
       detch(dev=dev, interface=interface)
-      dfu_release_interface(dev)
       print(f"delay {args.detach_delay} sec")
       sleep(args.detach_delay)
       print("issue usb reset")

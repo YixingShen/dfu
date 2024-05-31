@@ -62,12 +62,12 @@ _DFU_DESCRIPTOR_LEN = 9
 _DFU_DESC_FUNCTIONAL = 0x21
 
 # mode
-MODE_NONE = 0
-MODE_VERSION = 1
-MODE_LIST = 2
-MODE_DETACH = 3
-MODE_UPLOAD = 4
-MODE_DOWNLOAD = 5
+CMD_NONE = 0
+CMD_VERSION = 1
+CMD_LIST = 2
+CMD_DETACH = 3
+CMD_UPLOAD = 4
+CMD_DOWNLOAD = 5
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
@@ -292,11 +292,11 @@ def dfu_upload(
   return data
 
 def dfu_claim_interface(dev: usb.core.Device, interface: int, alt: int) -> None:
-  logger.info("Claiming USB DFU interface %d", interface)
+  print(f"Uploading binary file: {interface}")
   usb.util.claim_interface(dev, interface)
 
 def dfu_release_interface(dev: usb.core.Device) -> None:
-  logger.info("Releasing USB DFU interface")
+  print(f"Releasing USB DFU interface")
   usb.util.dispose_resources(dev)
 
 def _get_dfu_devices(
@@ -392,8 +392,8 @@ def download(
   interface: int = 0,
   transferSize: int = 0,
 ) -> int:
-  logger.info("Downloading binary file: %s", filename)
-  
+  print(f"Downloading binary file: {filename}")
+
   if not os.path.exists(filename) :
     print(f"not exists: {filename}")
     return 1
@@ -447,7 +447,7 @@ def upload(
   interface: int = 0,
   transferSize: int = 0,
 ) -> int:
-  logger.info("Uploading binary file: %s", filename)
+  print(f"Uploading binary file: {filename}")
   fout = open(filename, "wb")
   
   if not os.access(filename, os.W_OK) :
@@ -577,7 +577,7 @@ def get_dfu_device(
   return dev, dfu_mode, interface, altsetting, transfer_size
 
 def main() -> int:
-  mode = MODE_NONE
+  command = CMD_NONE
 
   if args.device:
     vidpid = args.device.split(":")
@@ -604,35 +604,38 @@ def main() -> int:
     vid, pid = None, None
 
   if args.list:
-    mode = MODE_LIST
+    command = CMD_LIST
 
   if args.download_file:
-    mode = MODE_DOWNLOAD
+    mode = CMD_DOWNLOAD
 
   if args.upload_file:
-    mode = MODE_UPLOAD
+    command = CMD_UPLOAD
 
   if args.detach:
-    mode = MODE_DETACH
+    command = CMD_DETACH
 
   if args.version:
-    mode = MODE_VERSION
+    command = CMD_VERSION
 
   print(f"dfu.py version {_version.__version__}")
 
-  if mode == MODE_VERSION:
+  if command == CMD_VERSION:
     return 0
 
-  if mode == MODE_NONE:
+  if command == CMD_NONE:
     print("No command specified")
     return 0
+
+  if args.verbose:
+    print(f"command = {command}")
 
   dev = None
 
   try:
     error = 0
 
-    if mode == MODE_LIST:
+    if command == CMD_LIST:
       list_devices(vid=vid, pid=pid)
       return error
 
@@ -647,7 +650,7 @@ def main() -> int:
       print(f"selected altsetting = {altsetting}")
       print(f"selected transfer size = {transfer_size}")
 
-    if mode == MODE_DETACH:
+    if command == CMD_DETACH:
       dfu_claim_interface(dev, interface, altsetting)
       dev.set_interface_altsetting(interface, altsetting)
       error = detch(dev=dev, interface=interface)
@@ -682,7 +685,7 @@ def main() -> int:
 
     dfu_claim_interface(dev, interface, altsetting)
     dev.set_interface_altsetting(interface, altsetting)
-    if mode == MODE_DOWNLOAD:
+    if command == CMD_DOWNLOAD:
       error = download(
         dev=dev,
         filename=args.download_file,
@@ -690,7 +693,7 @@ def main() -> int:
         transferSize=transfer_size
       )
 
-    if mode == MODE_UPLOAD:
+    if command == CMD_UPLOAD:
       error = upload(
         dev=dev,
         filename=args.upload_file,
@@ -716,13 +719,13 @@ def main() -> int:
   ) as err:
     if dev != None:
       dfu_release_interface(dev)
-    if mode == MODE_DOWNLOAD:
+    if command == CMD_DOWNLOAD:
       logger.error("DFU download failed: %s", repr(err))
-    elif mode == MODE_UPLOAD:
+    elif command == CMD_UPLOAD:
       logger.error("DFU upload failed: %s", repr(err))
-    elif mode == MODE_DETACH:
+    elif command == CMD_DETACH:
       logger.error("DFU detach failed: %s", repr(err))
-    elif mode == MODE_LIST:
+    elif command == CMD_LIST:
       logger.error("DFU list failed: %s", repr(err))
     else :
       logger.error("failed: %s", repr(err))
@@ -839,11 +842,7 @@ if __name__ == '__main__':
   )
 
   args = parser.parse_args()
-
-  if args.verbose:
-    logging.basicConfig(level=logging.DEBUG)
-  else :
-    logging.basicConfig(level=logging.INFO)
+  logging.basicConfig(level=logging.INFO)
 
   if args.verbose:
     print(f'version = {args.version}')

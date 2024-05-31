@@ -607,7 +607,7 @@ def main() -> int:
     command = CMD_LIST
 
   if args.download_file:
-    mode = CMD_DOWNLOAD
+    command = CMD_DOWNLOAD
 
   if args.upload_file:
     command = CMD_UPLOAD
@@ -687,10 +687,6 @@ def main() -> int:
         if dfu_device == None:
           return 1
 
-        if dfu_mode != _DFU_PROTOCOL_DFU:
-          print(f"Failed! device is still in run-time mode")
-          return 1
-
         if args.verbose:
           print(f"get_dfu_device:")
           print(f" vid:pid = {dfu_device.idVendor:04x}:{dfu_device.idProduct:04x}")
@@ -698,6 +694,10 @@ def main() -> int:
           print(f" selected interface = {interface}")
           print(f" selected altsetting = {altsetting}")
           print(f" selected transfer size = {transfer_size}")
+
+        if dfu_mode != _DFU_PROTOCOL_DFU:
+          print(f"Failed! device is still in run-time mode")
+          return 1
 
     print(f"Device is really in dfu mode")
     dfu_claim_interface(dfu_device, interface, altsetting)

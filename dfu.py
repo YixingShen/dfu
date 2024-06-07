@@ -541,6 +541,11 @@ def get_dfu_device(
   if dfu_desc is None:
     raise ValueError("No DFU Functional descriptor, is this a valid DFU device?")
 
+  bitWillDetach = False
+  
+  if (dfu_desc.bmAttributes & _DFU_WILL_DETACH):
+      bitWillDetach = True
+
   if args.verbose:
     print(f"DFU Functional descriptor:")
     print(f" bcdDFUVersion = 0x{dfu_desc.bcdDFUVersion:04X}")
@@ -549,13 +554,24 @@ def get_dfu_device(
     print(f" bmAttributes = 0x{dfu_desc.bmAttributes}")
   
     if (dfu_desc.bmAttributes & _DFU_CAN_DOWNLOAD):
-      print(f"  bitCanDnload = {dfu_desc.bmAttributes}")
+      print(f"  bitCanDnload = 1")
+    else :
+      print(f"  bitCanDnload = 0")
+
     if (dfu_desc.bmAttributes & _DFU_CAN_UPLOAD):
-      print(f"  bitCanUpload = {dfu_desc.bmAttributes}")
+      print(f"  bitCanUpload = 1")
+    else :
+      print(f"  bitCanUpload = 0")
+
     if (dfu_desc.bmAttributes & _DFU_MANIFEST_TOL):
-      print(f"  bitManifestationTolerant = {dfu_desc.bmAttributes}")
+      print(f"  bitManifestationTolerant = 1")
+    else :
+      print(f"  bitManifestationTolerant = 0")
+
     if (dfu_desc.bmAttributes & _DFU_WILL_DETACH):
-      print(f"  bitWillDetach = {dfu_desc.bmAttributes}")
+      print(f"  bitWillDetach = 1")
+    else :
+      print(f"  bitWillDetach = 0")
 
   #if dfu_desc.bcdDFUVersion != 0x0101 :
   #  raise ValueError("bcdDFUVersion != 0x0101")
@@ -719,12 +735,18 @@ def main() -> int:
         transferSize=transfer_size
       )
 
-    if args.final_reset and error == 0:
+    if args.final_detach and error == 0:
       detch(dfu_device, interface)
       print(f"delay {args.detach_delay} sec")
       sleep(args.detach_delay)
-      print("issue usb reset")
-      dfu_device.reset()
+
+      # bitWillDetach: device will perform a bus 
+      # detach-attach sequence when it receives a DFU_DETACH request. 
+      # The host must not issue a USB Reset. (bitWillDetach)
+      # 0 = no; 1 = yes
+      if bitWillDetach is False :
+        print("issue usb reset")
+        dfu_device.reset()
 
     dfu_release_interface(dfu_device)
     return error
@@ -845,8 +867,8 @@ if __name__ == '__main__':
   parser.add_argument(
     "-R",
     "--reset",
-    dest="final_reset",
-    help="detach and issue USB Reset signalling once we're finished",
+    dest="final_detach",
+    help="detach and issue USB Reset (if bitWillDetach = 0) signalling",
     action="store_true",
     default=False,
   )
@@ -875,6 +897,6 @@ if __name__ == '__main__':
     print(f'upload_size = {args.upload_size}')
     print(f'detach = {args.detach}')
     print(f'detach_delay = {args.detach_delay}')
-    print(f'final_reset = {args.final_reset}')
+    print(f'final_detach = {args.final_detach}')
 
   sys.exit(main())

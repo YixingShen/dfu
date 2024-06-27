@@ -69,6 +69,7 @@ CMD_LIST = 2
 CMD_DETACH = 3
 CMD_UPLOAD = 4
 CMD_DOWNLOAD = 5
+CMD_RANDOM_BIN = 6
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
@@ -640,6 +641,9 @@ def main() -> int:
 
   if args.version:
     command = CMD_VERSION
+    
+  if args.random_bin_file_size:
+    command = CMD_RANDOM_BIN
 
   print(f"dfu.py version {_version.__version__}")
 
@@ -661,6 +665,17 @@ def main() -> int:
     if command == CMD_LIST:
       list_devices(vid=vid, pid=pid)
       return error
+
+    if command == CMD_RANDOM_BIN:
+      fileSize = args.random_bin_file_size
+      fileName = "_tmp_random.bin"
+      fout = open(fileName, "wb")
+      fout.write(os.urandom(fileSize))
+      fout.close()
+
+      if not os.access(fileName, os.W_OK) :
+         print(f"not writable: {fileName}")
+         return 1
 
     dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
@@ -890,6 +905,15 @@ if __name__ == '__main__':
     help="Print verbose debug statements",
     action="store_true",
     default=False,
+  )
+  parser.add_argument(
+    "-G",
+    "--generate",
+    dest="random_bin_file_size",
+    help="generate a random binary file \"_tmp_random.bin\"",
+    required=False,
+    type=lambda x: int(x,0),
+    default=4096,
   )
 
   args = parser.parse_args()

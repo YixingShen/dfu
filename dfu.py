@@ -313,9 +313,13 @@ def _get_dfu_devices(
               if (intf.bInterfaceClass == 0xFE and intf.bInterfaceSubClass == 1):
                 return True
       return False
-    
-  back = libusb1.get_backend(find_library=lambda x: r"./libusb-1.0.dll")
-  return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
+  
+  localpath_libusb1_win32 = os.path.dirname(sys.argv[0]) + "\libusb-1.0.dll"
+  if sys.platform == 'win32' and os.path.exists(localpath_libusb1_win32):
+    back = libusb1.get_backend(find_library=lambda x:localpath_libusb1_win32)
+    return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
+  else :
+    return list(usb.core.find(find_all=True, custom_match=FilterDFU()))
 
 def _dfu_download(
   dev: usb.core.Device, interface: int, data: bytes, xfersize: int

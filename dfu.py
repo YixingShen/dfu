@@ -5,6 +5,7 @@ import os
 import colorama
 import dataclasses
 from time import sleep
+import timeit
 from typing import Any, List, Optional
 import usb.core
 import usb.util
@@ -321,7 +322,7 @@ def _dfu_download(
 ) -> None:
   transaction = 0
   bytes_downloaded = 0
-  _totol = len(data)+1
+  _totol = len(data)
   progressbar = ProgressBar(total=_totol, bar_total=30)
 
   try:
@@ -351,7 +352,7 @@ def _dfu_upload(
 ) -> bytes:
   transaction = 0
   bytes_uploaded = 0
-  _totol = int(args.upload_size+1)
+  _totol = int(args.upload_size)
   progressbar = ProgressBar(total=_totol, bar_total=30)
   data = bytes()
 
@@ -720,20 +721,26 @@ def main() -> int:
     dfu_device.set_interface_altsetting(interface, altsetting)
 
     if command == CMD_DOWNLOAD:
+      start = timeit.default_timer()
       error = download(
         dev=dfu_device,
         filename=args.download_file,
         interface=interface,
         transferSize=transfer_size
       )
+      stop = timeit.default_timer()
+      print(f"The elapsed time = {stop - start:f} sec")
 
     if command == CMD_UPLOAD:
+      start = timeit.default_timer()
       error = upload(
         dev=dfu_device,
         filename=args.upload_file,
         interface=interface,
         transferSize=transfer_size
       )
+      stop = timeit.default_timer()
+      print(f"The elapsed time = {stop - start:f} sec")
 
     if args.final_detach and error == 0:
       detch(dfu_device, interface)

@@ -69,7 +69,7 @@ CMD_LIST = 2
 CMD_DETACH = 3
 CMD_UPLOAD = 4
 CMD_DOWNLOAD = 5
-CMD_RANDOM_BIN = 6
+CMD_DOWNLOAD_RANDOM_BIN = 6
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
@@ -633,6 +633,9 @@ def main() -> int:
   if args.download_file:
     command = CMD_DOWNLOAD
 
+  if args.random_bin_file_size != 0:
+    command = CMD_DOWNLOAD_RANDOM_BIN
+    
   if args.upload_file:
     command = CMD_UPLOAD
 
@@ -725,10 +728,11 @@ def main() -> int:
     dfu_claim_interface(dfu_device, interface, altsetting)
     dfu_device.set_interface_altsetting(interface, altsetting)
 
-    if command == CMD_DOWNLOAD:
-      download_file = args.download_file
+    if command == CMD_DOWNLOAD or command == CMD_DOWNLOAD_RANDOM_BIN:
+      if command == CMD_DOWNLOAD:
+        download_file = args.download_file
 
-      if args.random_bin_file_size != 0:
+      if command == CMD_DOWNLOAD_RANDOM_BIN:
         fileSize = args.random_bin_file_size
         download_file = "_tmp_random.bin"
         fout = open(download_file, "wb")
@@ -907,12 +911,12 @@ if __name__ == '__main__':
   )
   parser.add_argument(
     "-G",
-    "--generate-random-bin-file",
+    "--generate-random-bin-file-download",
     dest="random_bin_file_size",
-    help="generate a random binary file \"_tmp_random.bin\"",
+    help="generate a random binary file \"_tmp_random.bin\" and download it to device",
     required=False,
     type=lambda x: int(x,0),
-    default=0,
+    default=4096,
   )
 
   args = parser.parse_args()
@@ -932,5 +936,6 @@ if __name__ == '__main__':
     print(f'detach = {args.detach}')
     print(f'detach_delay = {args.detach_delay}')
     print(f'final_detach = {args.final_detach}')
+    print(f'random_bin_file_size = {args.random_bin_file_size}')
 
   sys.exit(main())

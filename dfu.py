@@ -50,16 +50,16 @@ _DFU_STATUS_ERR_UNKNOWN      = 0x0E
 _DFU_STATUS_ERR_STALLEDPKT   = 0x0F
 
 # DFU commands
-_DFU_CMD_DETACH = 0
-_DFU_CMD_DOWNLOAD = 1
-_DFU_CMD_UPLOAD = 2
+_DFU_CMD_DETACH    = 0
+_DFU_CMD_DOWNLOAD  = 1
+_DFU_CMD_UPLOAD    = 2
 _DFU_CMD_GETSTATUS = 3
 _DFU_CMD_CLRSTATUS = 4
-_DFU_CMD_GETSTATE = 5
-_DFU_CMD_ABORT = 6
+_DFU_CMD_GETSTATE  = 5
+_DFU_CMD_ABORT     = 6
 
 # DFU Des
-_DFU_DESCRIPTOR_LEN = 9
+_DFU_DESCRIPTOR_LEN  = 9
 _DFU_DESC_FUNCTIONAL = 0x21
 
 # mode
@@ -77,10 +77,10 @@ _DFU_PROTOCOL_RT  = 0x01
 _DFU_PROTOCOL_DFU = 0x02
 
 # DFU bmAttributes
-_DFU_CAN_DOWNLOAD	= (1 << 0)
-_DFU_CAN_UPLOAD	  = (1 << 1)
-_DFU_MANIFEST_TOL	= (1 << 2)
-_DFU_WILL_DETACH	= (1 << 3)
+_DFU_CAN_DOWNLOAD    = (1 << 0)
+_DFU_CAN_UPLOAD      = (1 << 1)
+_DFU_MANIFEST_TOL    = (1 << 2)
+_DFU_WILL_DETACH     = (1 << 3)
 
 @dataclasses.dataclass
 class dfu_status:
@@ -641,9 +641,6 @@ def main() -> int:
 
   if args.version:
     command = CMD_VERSION
-    
-  if args.random_bin_file_size:
-    command = CMD_RANDOM_BIN
 
   print(f"dfu.py version {_version.__version__}")
 
@@ -665,17 +662,6 @@ def main() -> int:
     if command == CMD_LIST:
       list_devices(vid=vid, pid=pid)
       return error
-
-    if command == CMD_RANDOM_BIN:
-      fileSize = args.random_bin_file_size
-      fileName = "_tmp_random.bin"
-      fout = open(fileName, "wb")
-      fout.write(os.urandom(fileSize))
-      fout.close()
-
-      if not os.access(fileName, os.W_OK) :
-         print(f"not writable: {fileName}")
-         return 1
 
     dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
@@ -740,10 +726,23 @@ def main() -> int:
     dfu_device.set_interface_altsetting(interface, altsetting)
 
     if command == CMD_DOWNLOAD:
+      download_file = args.download_file
+
+      if args.random_bin_file_size != 0:
+        fileSize = args.random_bin_file_size
+        download_file = "_tmp_random.bin"
+        fout = open(download_file, "wb")
+        fout.write(os.urandom(fileSize))
+        fout.close()
+      
+        if not os.access(download_file, os.W_OK) :
+           print(f"not writable: {download_file}")
+           return 1
+
       start = timeit.default_timer()
       error = download(
         dev=dfu_device,
-        filename=args.download_file,
+        filename=download_file,
         interface=interface,
         transferSize=transfer_size
       )
@@ -908,12 +907,12 @@ if __name__ == '__main__':
   )
   parser.add_argument(
     "-G",
-    "--generate",
+    "--generate-random-bin-file",
     dest="random_bin_file_size",
     help="generate a random binary file \"_tmp_random.bin\"",
     required=False,
     type=lambda x: int(x,0),
-    default=4096,
+    default=0,
   )
 
   args = parser.parse_args()

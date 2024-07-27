@@ -633,7 +633,7 @@ def main() -> int:
   if args.download_file:
     command = CMD_DOWNLOAD
 
-  if args.random_bin_file_size != 0:
+  if args.download_random_bin_file_size:
     command = CMD_DOWNLOAD_RANDOM_BIN
     
   if args.upload_file:
@@ -733,15 +733,17 @@ def main() -> int:
         download_file = args.download_file
 
       if command == CMD_DOWNLOAD_RANDOM_BIN:
-        fileSize = args.random_bin_file_size
+        fileSize = args.download_random_bin_file_size
         download_file = "_tmp_random.bin"
         fout = open(download_file, "wb")
         fout.write(os.urandom(fileSize))
         fout.close()
       
         if not os.access(download_file, os.W_OK) :
-           print(f"not writable: {download_file}")
+           print(f"generate '{download_file}' failed!")
            return 1
+        else :
+           print(f"generate file '{download_file}' size {fileSize}")
 
       start = timeit.default_timer()
       error = download(
@@ -912,11 +914,10 @@ if __name__ == '__main__':
   parser.add_argument(
     "-G",
     "--generate-random-bin-file-download",
-    dest="random_bin_file_size",
+    dest="download_random_bin_file_size",
     help="generate a random binary file \"_tmp_random.bin\" and download it to device",
     required=False,
-    type=lambda x: int(x,0),
-    default=4096,
+    type=lambda x: int(x,0)
   )
 
   args = parser.parse_args()
@@ -936,6 +937,6 @@ if __name__ == '__main__':
     print(f'detach = {args.detach}')
     print(f'detach_delay = {args.detach_delay}')
     print(f'final_detach = {args.final_detach}')
-    print(f'random_bin_file_size = {args.random_bin_file_size}')
+    print(f'download_random_bin_file_size = {args.download_random_bin_file_size}')
 
   sys.exit(main())

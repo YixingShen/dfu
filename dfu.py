@@ -69,7 +69,6 @@ CMD_LIST = 2
 CMD_DETACH = 3
 CMD_UPLOAD = 4
 CMD_DOWNLOAD = 5
-CMD_DOWNLOAD_RANDOM_BIN = 6
 
 # DFU protocol
 _DFU_PROTOCOL_NONE = 0x00
@@ -598,7 +597,7 @@ def get_dfu_device(
     interface = args.interface
   
   altsetting = args.match_iface_alt_index
-  return dev, dfu_mode, interface, altsetting, transfer_size
+  return dev, dfu_mode, bitWillDetach, interface, altsetting, transfer_size
 
 def main() -> int:
   command = CMD_NONE
@@ -632,9 +631,6 @@ def main() -> int:
 
   if args.download_file:
     command = CMD_DOWNLOAD
-
-  if args.download_random_bin_file_size:
-    command = CMD_DOWNLOAD_RANDOM_BIN
     
   if args.upload_file:
     command = CMD_UPLOAD
@@ -666,7 +662,7 @@ def main() -> int:
       list_devices(vid=vid, pid=pid)
       return error
 
-    dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+    dfu_device, dfu_mode, bitWillDetach, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
     if dfu_device == None:
       return 1
@@ -728,27 +724,11 @@ def main() -> int:
     dfu_claim_interface(dfu_device, interface, altsetting)
     dfu_device.set_interface_altsetting(interface, altsetting)
 
-    if command == CMD_DOWNLOAD or command == CMD_DOWNLOAD_RANDOM_BIN:
-      if command == CMD_DOWNLOAD:
-        download_file = args.download_file
-
-      if command == CMD_DOWNLOAD_RANDOM_BIN:
-        fileSize = args.download_random_bin_file_size
-        download_file = "_tmp_random.bin"
-        fout = open(download_file, "wb")
-        fout.write(os.urandom(fileSize))
-        fout.close()
-      
-        if not os.access(download_file, os.W_OK) :
-           print(f"generate '{download_file}' failed!")
-           return 1
-        else :
-           print(f"generate file '{download_file}' size {fileSize}")
-
+    if command == CMD_DOWNLOAD:
       start = timeit.default_timer()
       error = download(
         dev=dfu_device,
-        filename=download_file,
+        filename=args.download_file,
         interface=interface,
         transferSize=transfer_size
       )
@@ -911,14 +891,6 @@ if __name__ == '__main__':
     action="store_true",
     default=False,
   )
-  parser.add_argument(
-    "-G",
-    "--generate-random-bin-file-download",
-    dest="download_random_bin_file_size",
-    help="generate a random binary file \"_tmp_random.bin\" and download it to device",
-    required=False,
-    type=lambda x: int(x,0)
-  )
 
   args = parser.parse_args()
   logging.basicConfig(level=logging.INFO)
@@ -937,6 +909,5 @@ if __name__ == '__main__':
     print(f'detach = {args.detach}')
     print(f'detach_delay = {args.detach_delay}')
     print(f'final_detach = {args.final_detach}')
-    print(f'download_random_bin_file_size = {args.download_random_bin_file_size}')
 
   sys.exit(main())

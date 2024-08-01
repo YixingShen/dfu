@@ -17,6 +17,19 @@ logger = logging.getLogger()
 # Default USB request timeout
 _TIMEOUT_MS = 5000
 _DETACH_DELAY_S = 5
+_MAX_TRANSFER_SIZE = 4096
+
+# Default update size
+_DFU_UPDATE_SIZE = 1024*1024*32
+
+# Default transfer size
+_DFU_TRANSFER_SIZE = 4096
+
+# Default DFU interface
+_DFU_INTERFACE = 0
+
+# Default Altsetting of DFU interface
+_DFU_ALTSETTING = 0
 
 # DFU states
 _DFU_STATE_APP_IDLE = 0x00
@@ -357,6 +370,10 @@ def _dfu_upload(
   transaction = 0
   bytes_uploaded = 0
   _totol = int(args.upload_size)
+
+  if _totol <= 0:
+    _totol = _DFU_UPDATE_SIZE
+
   progressbar = ProgressBar(total=_totol, bar_total=30)
   data = bytes()
 
@@ -517,8 +534,8 @@ def detch(
 def get_dfu_device(
   vid: Optional[int] = None, pid: Optional[int] = None
 ):
-  transfer_size = args.transfer_size
-  interface = 0
+  transfer_size = _DFU_TRANSFER_SIZE
+  interface = _DFU_INTERFACE
   dfu_mode = 0
   altsetting = args.match_iface_alt_index
   dev = None
@@ -581,8 +598,10 @@ def get_dfu_device(
   #if dfu_desc.bcdDFUVersion != 0x0101 :
   #  raise ValueError("bcdDFUVersion != 0x0101")
 
-  if (transfer_size <= 0) :
-    transfer_size = dfu_desc.wTransferSize
+  transfer_size = dfu_desc.wTransferSize
+
+  if args.transfer_size:
+    transfer_size = args.transfer_size
 
   for cfg in dev:
     for intf in cfg:
@@ -593,7 +612,7 @@ def get_dfu_device(
   
         break
 
-  if (args.interface >= 0):
+  if args.interface:
     interface = args.interface
   
   altsetting = args.match_iface_alt_index
@@ -723,7 +742,15 @@ def main() -> int:
     print(f"Device is really in dfu mode")
     dfu_claim_interface(dfu_device, interface, altsetting)
     dfu_device.set_interface_altsetting(interface, altsetting)
+    
+    if transfer_size > _MAX_TRANSFER_SIZE:
+      print(f"Failed! transfer size > " + str(_MAX_TRANSFER_SIZE))
+      return 1
 
+    if (transfer_size % 64) != 0:
+      print(f"Failed! transfer size is not multiple of 64")
+      return 1
+      
     if command == CMD_DOWNLOAD:
       start = timeit.default_timer()
       error = download(
@@ -826,19 +853,18 @@ if __name__ == '__main__':
     "-i",
     "--intf",
     dest="interface",
-    help="Specify the DFU Interface number. default is -1 \"auto detect DFU interface from USB descriptor\"",
+    help="Specify the DFU Interface number. default is \"auto detect DFU interface from USB descriptor\"",
     required=False,
     type=lambda x: int(x,0),
-    default=-1,
   )
   parser.add_argument(
     "-a",
     "--alt",
     dest="match_iface_alt_index",
-    help="Specify the Altsetting of the DFU Interface by number. default is 0",
+    help="Specify the Altsetting of the DFU Interface by number. default is " + str(_DFU_ALTSETTING),
     required=False,
     type=lambda x: int(x,0),
-    default=0,
+    default=_DFU_ALTSETTING,
   )
   parser.add_argument(
     "-t",
@@ -847,16 +873,15 @@ if __name__ == '__main__':
     help="Specify the number of bytes per USB Transfer",
     required=False,
     type=lambda x: int(x,0),
-    default=0,
   )
   parser.add_argument(
     "-Z",
     "--upload-size",
     dest="upload_size",
-    help="Specify the expected upload size, in bytes",
+    help="Specify the expected upload size, in bytes. default is " + str(_DFU_UPDATE_SIZE),
     required=False,
     type=lambda x: int(x,0),
-    default=1024*1024*32, #32M Bytes
+    default=_DFU_UPDATE_SIZE,
   )
   parser.add_argument(
     "-e",
@@ -870,7 +895,7 @@ if __name__ == '__main__':
     "-E",
     "--detach-delay",
     dest="detach_delay",
-    help="seconds Time to wait before reopening a device after detach",
+    help="seconds Time to wait before reopening a device after detach. default is " + str(_DETACH_DELAY_S),
     required=False,
     type=lambda x: int(x,0),
     default=_DETACH_DELAY_S,

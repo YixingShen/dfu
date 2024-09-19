@@ -798,13 +798,13 @@ def main() -> int:
     if dfu_device != None:
       dfu_release_interface(dfu_device)
     if command == CMD_DOWNLOAD:
-      logger.error("DFU download failed: %s", repr(err))
+      logger.error("DFU download failed")
     elif command == CMD_UPLOAD:
-      logger.error("DFU upload failed: %s", repr(err))
+      logger.error("DFU upload failed")
     elif command == CMD_DETACH:
-      logger.error("DFU detach failed: %s", repr(err))
+      logger.error("DFU detach failed")
     elif command == CMD_LIST:
-      logger.error("DFU list failed: %s", repr(err))
+      logger.error("DFU list failed")
     else :
       logger.error("failed: %s", repr(err))
 

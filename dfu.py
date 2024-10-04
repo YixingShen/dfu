@@ -117,6 +117,9 @@ class ProgressBar:
   
   def update(self, step=1, value=None):
     total = self.total
+    if total == 0:
+      total = 1;
+
     if (value is None):
       self.cnt += step
     else:
@@ -722,7 +725,7 @@ def main() -> int:
           return 1
 
         dfu_release_interface(dfu_device)
-        dfu_device, dfu_mode, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
+        dfu_device, dfu_mode, bitWillDetach, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
         if dfu_device == None:
           return 1

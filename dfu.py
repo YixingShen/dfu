@@ -706,8 +706,8 @@ def main() -> int:
 
     if dfu_mode != _DFU_PROTOCOL_DFU:
       print(f"Device is running in run-time mode")
-      dfu_claim_interface(dfu_device, interface, altsetting)
-      dfu_device.set_interface_altsetting(interface, altsetting)
+      dfu_claim_interface(dfu_device, interface, 0)
+      dfu_device.set_interface_altsetting(interface, 0)
 
       status = dfu_get_state(dfu_device, interface)
       sleep(status.bwPollTimeout/1000)

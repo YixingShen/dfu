@@ -722,9 +722,11 @@ def main() -> int:
         print("Device is really in run-time mode, send DFU detach request")
         error = detch(dfu_device, interface)
         if error != 0:
+          dfu_release_interface(dfu_device)
           return 1
 
-        dfu_release_interface(dfu_device)
+        print(f"delay {args.detach_delay} sec")
+        sleep(args.detach_delay)
         dfu_device, dfu_mode, bitWillDetach, interface, altsetting, transfer_size = get_dfu_device(vid=vid, pid=pid)
 
         if dfu_device == None:

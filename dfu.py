@@ -331,11 +331,22 @@ def _get_dfu_devices(
       return False
   
   localpath_libusb1_win32 = os.path.dirname(sys.argv[0]) + "\libusb-1.0.dll"
+  device = None
+
+  if args.verbose:
+    print(f"localpath_libusb1_win32 = {localpath_libusb1_win32}")
+
   if sys.platform == 'win32' and os.path.exists(localpath_libusb1_win32):
-    back = libusb1.get_backend(find_library=lambda x:localpath_libusb1_win32)
-    return list(usb.core.find(find_all=True, backend=back, custom_match=FilterDFU()))
+    libusb1_backend = libusb1.get_backend(find_library=lambda x:localpath_libusb1_win32)
   else :
-    return list(usb.core.find(find_all=True, custom_match=FilterDFU()))
+    libusb1_backend = libusb1.get_backend(find_library=libusb_package.find_library)
+
+  device = list(usb.core.find(find_all=True, backend=libusb1_backend, custom_match=FilterDFU()))
+
+  if args.verbose:
+    print(f"libusb1_backend.lib = {libusb1_backend.lib}")
+
+  return device
 
 def _dfu_download(
   dev: usb.core.Device, interface: int, data: bytes, xfersize: int
@@ -541,10 +552,11 @@ def get_dfu_device(
   altsetting = args.match_iface_alt_index
   dev = None
   devices = _get_dfu_devices(vid=vid, pid=pid)
-  
+  bitWillDetach = False
+
   if not devices:
     print("No DFU devices found")
-    return dev, dfu_mode, interface, altsetting, transfer_size
+    return dev, dfu_mode, bitWillDetach, interface, altsetting, transfer_size
 
   if len(devices) > 1:
     print(f"Too many DFU devices ({len(devices)}). List devices for "
@@ -563,8 +575,6 @@ def get_dfu_device(
 
   if dfu_desc is None:
     raise ValueError("No DFU Functional descriptor, is this a valid DFU device?")
-
-  bitWillDetach = False
   
   if (dfu_desc.bmAttributes & _DFU_WILL_DETACH):
       bitWillDetach = True
@@ -791,13 +801,7 @@ def main() -> int:
 
     dfu_release_interface(dfu_device)
     return error
-  except (
-    RuntimeError,
-    ValueError,
-    FileNotFoundError,
-    IsADirectoryError,
-    usb.core.USBError,
-  ) as err:
+  except Exception as err:
     if dfu_device != None:
       dfu_release_interface(dfu_device)
     if command == CMD_DOWNLOAD:
@@ -808,9 +812,8 @@ def main() -> int:
       logger.error("DFU detach failed")
     elif command == CMD_LIST:
       logger.error("DFU list failed")
-    else :
-      logger.error("failed: %s", repr(err))
 
+    logger.error("failed: %s", repr(err))
     return 1
 
 if __name__ == '__main__':

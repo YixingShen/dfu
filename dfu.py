@@ -10,6 +10,7 @@ from typing import Any, List, Optional
 import usb.core
 import usb.util
 from usb.backend import libusb1
+import libusb_package
 import _version
 
 logger = logging.getLogger()
@@ -344,7 +345,9 @@ def _get_dfu_devices(
   device = list(usb.core.find(find_all=True, backend=libusb1_backend, custom_match=FilterDFU()))
 
   if args.verbose:
-    print(f"libusb1_backend.lib = {libusb1_backend.lib}")
+    print(f"libusb1_backend = {libusb1_backend}")
+    if (libusb1_backend):
+      print(f"libusb1_backend.lib = {libusb1_backend.lib}")
 
   return device
 

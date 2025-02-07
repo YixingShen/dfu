@@ -331,15 +331,20 @@ def _get_dfu_devices(
                 return True
       return False
   
-  localpath_libusb1_win32 = os.path.dirname(sys.argv[0]) + "\libusb-1.0.dll"
+  #localpath_libusb1_win32 = os.path.dirname(sys.argv[0]) + "\libusb-1.0.dll"
+  localpath_libusb1_win32 = os.path.abspath(os.path.dirname(sys.argv[0]))+ "\libusb-1.0.dll"
   device = None
 
   if args.verbose:
     print(f"localpath_libusb1_win32 = {localpath_libusb1_win32}")
 
   if sys.platform == 'win32' and os.path.exists(localpath_libusb1_win32):
+    if args.verbose:
+      print(f"libusb1.get_backend localpath_libusb1_win32")
     libusb1_backend = libusb1.get_backend(find_library=lambda x:localpath_libusb1_win32)
   else :
+    if args.verbose:
+      print(f"libusb1.get_backend libusb_package.find_library")
     libusb1_backend = libusb1.get_backend(find_library=libusb_package.find_library)
 
   device = list(usb.core.find(find_all=True, backend=libusb1_backend, custom_match=FilterDFU()))
